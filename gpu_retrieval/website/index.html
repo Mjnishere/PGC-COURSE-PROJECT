@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPU Retrieval Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: a lab report. One narrow reading column, wide figures, numbers set in mono. */
+:root{
+  color-scheme:light;
+  --bg:#F4F6F9; --surface:#FFFFFF; --ink:#16202C; --ink2:#4B5666; --line:#D8DEE6; --accent:#1757AC; --accent-ink:#FFFFFF; --soft:#E9EEF5;
+  --s1:#257de0; --s2:#f47230; --s3:#00b894; --s4:#f2a600; --s5:#ee7fac; --gray:#8793A3;
+  --font:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',Arial,sans-serif; --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0E141B; --surface:#151D27; --ink:#E7ECF2; --ink2:#9AA7B8; --line:#263241; --accent:#7FB2F5; --accent-ink:#0E141B; --soft:#1B2633;
+    --s1:#338ced; --s2:#e76624; --s3:#00a888; --s4:#d28e05; --s5:#e24d8b; --gray:#6E7B8C;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0E141B; --surface:#151D27; --ink:#E7ECF2; --ink2:#9AA7B8; --line:#263241; --accent:#7FB2F5; --accent-ink:#0E141B; --soft:#1B2633;
+  --s1:#338ced; --s2:#e76624; --s3:#00a888; --s4:#d28e05; --s5:#e24d8b; --gray:#6E7B8C;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:17px;line-height:1.6}
+.wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+header.top{padding:48px 0 28px}
+.kicker{font-family:var(--mono);font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink2)}
+h1{font-size:clamp(30px,5vw,48px);line-height:1.1;margin:10px 0 14px;font-weight:600;text-wrap:balance;letter-spacing:-.01em}
+h2{font-size:clamp(22px,3.2vw,30px);line-height:1.2;margin:0 0 8px;font-weight:600;text-wrap:balance}
+h3{font-size:18px;margin:0 0 6px;font-weight:600}
+p{margin:0 0 12px;max-width:68ch}
+.lede{font-size:19px;color:var(--ink2);max-width:62ch}
+section{padding:36px 0;border-top:1px solid var(--line)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:22px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.tile .n{font-family:var(--mono);font-size:34px;font-weight:500;line-height:1.1}
+.tile .l{color:var(--ink2);font-size:15px;margin-top:6px}
+.note{font-size:14px;color:var(--ink2)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+.seg{display:inline-flex;flex-wrap:wrap;gap:6px}
+.seg button,.btn{font:inherit;font-size:15px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+.seg button[aria-pressed="true"],.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.seg button:hover,.btn:hover{border-color:var(--accent)}
+button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.controls{display:flex;flex-wrap:wrap;gap:16px 28px;margin-bottom:14px}
+.controls label{display:block;font-size:13px;font-family:var(--mono);color:var(--ink2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.06em}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin:4px 0 8px;font-size:15px}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.sw{width:14px;height:14px;border-radius:3px;display:inline-block}
+.chartbox{position:relative}
+svg.chart{display:block;width:100%;height:auto}
+svg text{font-family:var(--font);fill:var(--ink2);font-size:13px}
+svg .ax{stroke:var(--line);stroke-width:1}
+svg .grid{stroke:var(--line);stroke-width:1;opacity:.7}
+.tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;box-shadow:0 4px 18px rgba(0,0,0,.15);min-width:150px;display:none;z-index:2}
+.tip b{font-weight:600}.tip .r{display:flex;justify-content:space-between;gap:14px;font-family:var(--mono);font-size:13px}
+table{border-collapse:collapse;width:100%;font-size:14px;font-family:var(--mono)}
+th,td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--ink2);font-weight:500}
+.tablewrap{overflow-x:auto;margin-top:10px}
+.pipe{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin:16px 0}
+.stage{flex:1 1 150px;text-align:left;background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--gray);border-radius:10px;padding:12px 14px;cursor:pointer;font:inherit;color:var(--ink)}
+.stage[aria-pressed="true"]{border-color:var(--accent);border-top-color:var(--accent);background:var(--soft)}
+.stage .t{font-weight:600}.stage .s{font-size:14px;color:var(--ink2)}
+.detail{min-height:96px}
+pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:14px;line-height:1.55;margin:0}
+.cmd{position:relative;margin-bottom:14px}
+.cmd .btn{position:absolute;top:8px;right:8px;font-size:13px;padding:4px 9px}
+code{font-family:var(--mono);font-size:.92em}
+/* top-k stepper */
+.cells{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin:10px 0}
+.cell{border:1px solid var(--line);border-radius:8px;padding:6px 4px;text-align:center;font-family:var(--mono);font-size:13px;background:var(--surface)}
+.cell small{display:block;color:var(--ink2);font-size:11px}
+.cell.kept{border:2px solid var(--accent)}
+.cell.out{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.cell.out small{color:var(--accent-ink)}
+.lists{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+.lcol{border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--surface);min-height:120px}
+.lcol h4{margin:0 0 6px;font-size:13px;font-family:var(--mono);color:var(--ink2)}
+.item{font-family:var(--mono);font-size:13px;padding:3px 6px;border-radius:5px;margin-bottom:3px;border:1px solid transparent}
+.item.head{border-color:var(--accent)}
+.item.won{background:var(--accent);color:var(--accent-ink)}
+.item.done{opacity:.4;text-decoration:line-through}
+.result{font-family:var(--mono);font-size:15px;min-height:28px}
+.stepnav{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+@media (max-width:640px){.cells{grid-template-columns:repeat(4,1fr)}.lists{grid-template-columns:repeat(2,1fr)}body{font-size:16px}}
+.bars .brow{margin:16px 0}
+.bars .brow>.bl{font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.stack{display:flex;height:34px;border-radius:6px;overflow:hidden;gap:2px;background:transparent}
+.stack div{height:100%;min-width:0}
+.cap{font-family:var(--mono);font-size:13px;color:var(--ink2);margin-top:6px}
+footer{padding:28px 0 56px;border-top:1px solid var(--line);color:var(--ink2);font-size:15px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="kicker">Parallel &amp; Distributed Computing Laboratory · KLE Technological University</div>
+  <h1>GPU Retrieval Pipeline with Parallel Preprocessing and Top-k Selection</h1>
+  <p class="lede">For each of Q queries, find the K most similar vectors among N corpus vectors. Normalization, scoring and top-k selection all run on the GPU. Every number below is measured on an RTX 5060 Ti against a 20-thread Core Ultra 7 265K.</p>
+  <div class="tiles" id="tiles"></div>
+  <p class="note" style="margin-top:12px">Speedups are ranges across corpus sizes N = 65,536 to 2,097,152 (D = 128, Q = 64, K = 10). The CPU reference is a straightforward OpenMP loop. Recall was 1.0000 in all 48 GPU runs.</p>
+</header>
+
+<section id="pipeline">
+  <h2>The pipeline</h2>
+  <p>Select a stage to see how it maps to the GPU.</p>
+  <div class="pipe" id="pipe" role="group" aria-label="Pipeline stages"></div>
+  <div class="panel detail" id="stagedetail" aria-live="polite"></div>
+</section>
+
+<section id="topk">
+  <h2>Top-k without sorting</h2>
+  <p>Sorting every row of N scores does far more work than needed. The custom kernel gives each thread a slice of the row and a private list of the K best values it has seen, then merges the lists with K rounds of picking the largest head. This miniature uses 16 scores, 4 threads and K = 3. Thread T0 reads indexes 0, 4, 8 and 12, thread T1 reads 1, 5, 9 and 13, and so on.</p>
+  <div class="panel">
+    <div class="note" id="stepTitle"></div>
+    <div class="cells" id="cells"></div>
+    <div class="lists" id="lists"></div>
+    <div class="result" id="result"></div>
+    <p id="stepText" style="margin-top:8px"></p>
+    <div class="stepnav">
+      <button class="btn" id="prev">Back</button>
+      <button class="btn primary" id="next">Next step</button>
+      <button class="btn" id="reset">Reset</button>
+    </div>
+  </div>
+</section>
+
+<section id="results">
+  <h2>Results explorer</h2>
+  <p>Choose what to vary and what to compare. Time axes are logarithmic, so equal vertical distances mean equal ratios.</p>
+  <div class="panel">
+    <div class="controls">
+      <div><label>Vary</label><div class="seg" id="sweepSeg"></div></div>
+      <div><label>Metric</label><div class="seg" id="metricSeg"></div></div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <div class="chartbox" id="chartbox">
+      <svg class="chart" id="chart" viewBox="0 0 920 400" role="img" aria-label="Line chart of the selected metric"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <p class="note" id="metricNote"></p>
+    <details><summary style="cursor:pointer">Show the data as a table</summary><div class="tablewrap" id="tbl"></div></details>
+  </div>
+</section>
+
+<section id="breakdown">
+  <h2>Where the time goes</h2>
+  <p>Stage times for the 64-query run at each corpus size. The CPU does scoring and top-k in one fused loop, so those two are one block there.</p>
+  <div class="controls"><div><label>Corpus size N</label><div class="seg" id="nSeg"></div></div></div>
+  <div class="legend" id="blegend"></div>
+  <div class="bars panel" id="bars"></div>
+  <p class="note">The host-to-device copy is the largest GPU cost at every size. Keeping the corpus resident on the GPU between query batches removes it.</p>
+</section>
+
+<section id="blocks">
+  <h2>Blocks per query</h2>
+  <p>Stage 1 splits each score row across B blocks. In one run at N = 1,048,576 and Q = 16, the top-k stage took:</p>
+  <div class="tablewrap panel"><table id="btable"></table></div>
+  <p class="note" style="margin-top:8px">B = 1 leaves most of the GPU idle. Large B makes the second merge stage bigger. The differences are small and were measured once, so treat the best value as indicative.</p>
+</section>
+
+<section id="run">
+  <h2>Run it yourself</h2>
+  <p>On Windows with WSL2 and an NVIDIA driver, after installing CUDA toolkit 12.8 or newer inside Ubuntu:</p>
+  <div class="cmd"><pre id="c1">make cpu &amp;&amp; ./bench_cpu --N 262144 --D 128 --Q 64 --K 10</pre><button class="btn" data-copy="c1">Copy</button></div>
+  <div class="cmd"><pre id="c2">make gpu ARCH=sm_120 &amp;&amp; ./bench_gpu --N 1048576 --D 128 --Q 64 --K 10</pre><button class="btn" data-copy="c2">Copy</button></div>
+  <div class="cmd"><pre id="c3">bash scripts/sweep.sh &amp;&amp; python3 scripts/plot.py</pre><button class="btn" data-copy="c3">Copy</button></div>
+  <p class="note">Use the matching ARCH for other cards (for example sm_75 for a T4, sm_80 for an A100).</p>
+</section>
+
+<section id="limits">
+  <h2>Limits</h2>
+  <ul>
+    <li>The same CPU configuration measured 397 to 569 ms across separate runs, while the GPU stayed within 70 to 74 ms. That is why speedups are given as ranges.</li>
+    <li>The data is synthetic random vectors. K is limited to 32. The Q × N score matrix is stored in memory.</li>
+    <li>One machine, one GPU, under WSL2.</li>
+  </ul>
+  <p>Next steps: pinned memory with streams to hide the copy, cuBLAS or tensor cores for scoring, a fused score and top-k kernel, and radix selection for larger K.</p>
+</section>
+
+<footer>Team: Mudit Nayak, Kartik, Manoj and Vinayak. KLE Technological University, Hubballi. Ubuntu 24.04 LTS on WSL2, GCC 13.x, Intel Core Ultra 7 265K, NVIDIA GeForce RTX 5060 Ti (16 GB, compute capability 12.0), CUDA 13.3, driver 610.88.</footer>
+</div>
+
+<script>
+const DATA={"N": [{"x": 65536, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 6.867, "score_ms": 18.912, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 25.778}, "custom": {"h2d_ms": 2.671, "preprocess_ms": 0.183, "score_ms": 0.89, "topk_ms": 0.41, "d2h_ms": 0.098, "total_ms": 4.253}, "thrust": {"h2d_ms": 3.541, "preprocess_ms": 0.168, "score_ms": 0.89, "topk_ms": 9.727, "d2h_ms": 0.122, "total_ms": 14.449}}, {"x": 131072, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 2.432, "score_ms": 42.93, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 45.362}, "custom": {"h2d_ms": 6.334, "preprocess_ms": 0.371, "score_ms": 1.809, "topk_ms": 0.648, "d2h_ms": 0.157, "total_ms": 9.318}, "thrust": {"h2d_ms": 6.177, "preprocess_ms": 0.361, "score_ms": 1.811, "topk_ms": 8.955, "d2h_ms": 0.142, "total_ms": 17.446}}, {"x": 262144, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 4.906, "score_ms": 78.88, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 83.786}, "custom": {"h2d_ms": 12.584, "preprocess_ms": 0.729, "score_ms": 3.598, "topk_ms": 1.005, "d2h_ms": 0.137, "total_ms": 18.054}, "thrust": {"h2d_ms": 13.339, "preprocess_ms": 0.734, "score_ms": 3.598, "topk_ms": 45.121, "d2h_ms": 0.113, "total_ms": 62.905}}, {"x": 524288, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 12.978, "score_ms": 186.979, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 199.957}, "custom": {"h2d_ms": 25.141, "preprocess_ms": 1.454, "score_ms": 7.184, "topk_ms": 1.493, "d2h_ms": 0.142, "total_ms": 35.415}, "thrust": {"h2d_ms": 32.657, "preprocess_ms": 1.462, "score_ms": 7.189, "topk_ms": 39.12, "d2h_ms": 0.119, "total_ms": 80.546}}, {"x": 1048576, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 26.925, "score_ms": 370.445, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 397.37}, "custom": {"h2d_ms": 50.947, "preprocess_ms": 2.879, "score_ms": 14.357, "topk_ms": 2.217, "d2h_ms": 0.143, "total_ms": 70.543}, "thrust": {"h2d_ms": 56.447, "preprocess_ms": 2.882, "score_ms": 14.371, "topk_ms": 63.126, "d2h_ms": 0.169, "total_ms": 136.995}}, {"x": 2097152, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 38.683, "score_ms": 833.126, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 871.809}, "custom": {"h2d_ms": 99.812, "preprocess_ms": 5.74, "score_ms": 28.735, "topk_ms": 3.242, "d2h_ms": 0.261, "total_ms": 137.79}, "thrust": {"h2d_ms": 105.576, "preprocess_ms": 5.74, "score_ms": 28.812, "topk_ms": 73.358, "d2h_ms": 0.109, "total_ms": 213.594}}], "K": [{"x": 1, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 24.169, "score_ms": 445.662, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 469.831}, "custom": {"h2d_ms": 50.833, "preprocess_ms": 2.856, "score_ms": 14.349, "topk_ms": 0.758, "d2h_ms": 0.157, "total_ms": 68.953}, "thrust": {"h2d_ms": 55.897, "preprocess_ms": 2.916, "score_ms": 14.373, "topk_ms": 66.073, "d2h_ms": 0.169, "total_ms": 139.429}}, {"x": 5, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 24.003, "score_ms": 397.373, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 421.376}, "custom": {"h2d_ms": 50.269, "preprocess_ms": 2.868, "score_ms": 14.388, "topk_ms": 1.087, "d2h_ms": 0.145, "total_ms": 68.757}, "thrust": {"h2d_ms": 50.859, "preprocess_ms": 2.881, "score_ms": 20.82, "topk_ms": 48.592, "d2h_ms": 0.121, "total_ms": 123.273}}, {"x": 10, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 24.49, "score_ms": 383.726, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 408.216}, "custom": {"h2d_ms": 50.131, "preprocess_ms": 2.882, "score_ms": 14.368, "topk_ms": 2.23, "d2h_ms": 0.228, "total_ms": 69.841}, "thrust": {"h2d_ms": 50.986, "preprocess_ms": 2.883, "score_ms": 14.394, "topk_ms": 48.472, "d2h_ms": 0.115, "total_ms": 116.85}}, {"x": 16, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 27.534, "score_ms": 407.299, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 434.833}, "custom": {"h2d_ms": 49.287, "preprocess_ms": 2.859, "score_ms": 14.345, "topk_ms": 4.085, "d2h_ms": 0.148, "total_ms": 70.722}, "thrust": {"h2d_ms": 56.497, "preprocess_ms": 2.883, "score_ms": 14.382, "topk_ms": 70.986, "d2h_ms": 0.127, "total_ms": 144.876}}, {"x": 32, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 21.694, "score_ms": 402.568, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 424.262}, "custom": {"h2d_ms": 49.535, "preprocess_ms": 2.879, "score_ms": 14.387, "topk_ms": 11.624, "d2h_ms": 0.14, "total_ms": 78.565}, "thrust": {"h2d_ms": 59.339, "preprocess_ms": 2.889, "score_ms": 14.384, "topk_ms": 70.902, "d2h_ms": 0.151, "total_ms": 147.665}}], "Q": [{"x": 1, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 22.192, "score_ms": 26.805, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 48.996}, "custom": {"h2d_ms": 28.746, "preprocess_ms": 1.473, "score_ms": 3.733, "topk_ms": 0.093, "d2h_ms": 0.137, "total_ms": 34.183}, "thrust": {"h2d_ms": 29.561, "preprocess_ms": 1.444, "score_ms": 4.064, "topk_ms": 3.398, "d2h_ms": 0.146, "total_ms": 38.614}}, {"x": 8, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 17.974, "score_ms": 43.559, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 61.533}, "custom": {"h2d_ms": 41.106, "preprocess_ms": 1.501, "score_ms": 6.345, "topk_ms": 0.423, "d2h_ms": 0.577, "total_ms": 49.952}, "thrust": {"h2d_ms": 36.589, "preprocess_ms": 1.436, "score_ms": 3.904, "topk_ms": 9.254, "d2h_ms": 0.146, "total_ms": 51.33}}, {"x": 32, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 22.178, "score_ms": 110.294, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 132.472}, "custom": {"h2d_ms": 29.599, "preprocess_ms": 1.439, "score_ms": 4.275, "topk_ms": 1.053, "d2h_ms": 0.129, "total_ms": 36.495}, "thrust": {"h2d_ms": 28.001, "preprocess_ms": 1.449, "score_ms": 7.133, "topk_ms": 33.096, "d2h_ms": 0.179, "total_ms": 69.858}}, {"x": 128, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 16.014, "score_ms": 564.431, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 580.445}, "custom": {"h2d_ms": 30.997, "preprocess_ms": 1.463, "score_ms": 16.525, "topk_ms": 2.505, "d2h_ms": 0.405, "total_ms": 51.895}, "thrust": {"h2d_ms": 24.872, "preprocess_ms": 1.453, "score_ms": 32.234, "topk_ms": 277.544, "d2h_ms": 0.111, "total_ms": 336.213}}, {"x": 512, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 20.68, "score_ms": 2484.985, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 2505.665}, "custom": {"h2d_ms": 27.289, "preprocess_ms": 2.758, "score_ms": 69.776, "topk_ms": 7.627, "d2h_ms": 0.172, "total_ms": 107.622}, "thrust": {"h2d_ms": 27.354, "preprocess_ms": 3.414, "score_ms": 105.917, "topk_ms": 1271.594, "d2h_ms": 0.167, "total_ms": 1408.445}}], "D": [{"x": 64, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 7.376, "score_ms": 86.668, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 94.044}, "custom": {"h2d_ms": 12.652, "preprocess_ms": 1.282, "score_ms": 3.807, "topk_ms": 1.518, "d2h_ms": 0.156, "total_ms": 19.415}, "thrust": {"h2d_ms": 13.095, "preprocess_ms": 1.303, "score_ms": 3.803, "topk_ms": 37.443, "d2h_ms": 0.114, "total_ms": 55.759}}, {"x": 128, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 14.147, "score_ms": 189.509, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 203.656}, "custom": {"h2d_ms": 31.368, "preprocess_ms": 1.444, "score_ms": 8.016, "topk_ms": 1.509, "d2h_ms": 0.168, "total_ms": 42.505}, "thrust": {"h2d_ms": 28.342, "preprocess_ms": 1.452, "score_ms": 8.378, "topk_ms": 51.816, "d2h_ms": 0.132, "total_ms": 90.12}}, {"x": 256, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 30.192, "score_ms": 499.675, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 529.867}, "custom": {"h2d_ms": 51.267, "preprocess_ms": 3.103, "score_ms": 14.839, "topk_ms": 1.525, "d2h_ms": 0.103, "total_ms": 70.836}, "thrust": {"h2d_ms": 52.876, "preprocess_ms": 3.077, "score_ms": 14.525, "topk_ms": 45.836, "d2h_ms": 0.103, "total_ms": 116.417}}, {"x": 384, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 34.259, "score_ms": 745.937, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 780.195}, "custom": {"h2d_ms": 70.477, "preprocess_ms": 26.912, "score_ms": 47.464, "topk_ms": 1.546, "d2h_ms": 0.172, "total_ms": 146.57}, "thrust": {"h2d_ms": 78.057, "preprocess_ms": 15.458, "score_ms": 56.302, "topk_ms": 143.966, "d2h_ms": 0.161, "total_ms": 293.944}}, {"x": 768, "cpu": {"h2d_ms": 0.0, "preprocess_ms": 73.773, "score_ms": 1834.106, "topk_ms": 0.0, "d2h_ms": 0.0, "total_ms": 1907.878}, "custom": {"h2d_ms": 175.287, "preprocess_ms": 18.816, "score_ms": 74.468, "topk_ms": 1.506, "d2h_ms": 0.153, "total_ms": 270.229}, "thrust": {"h2d_ms": 200.394, "preprocess_ms": 11.361, "score_ms": 73.204, "topk_ms": 92.604, "d2h_ms": 0.144, "total_ms": 377.708}}]};
+const BDATA=[{"B": 1, "topk": 1.725}, {"B": 4, "topk": 0.797}, {"B": 16, "topk": 1.143}, {"B": 64, "topk": 1.31}, {"B": 256, "topk": 1.754}, {"B": 1024, "topk": 1.868}];
+const $=s=>document.querySelector(s);
+const fmt=(v,d)=>{d=d===undefined?(v>=100?0:v>=10?1:2):d;return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});};
+const comp=o=>o.preprocess_ms+o.score_ms+o.topk_ms;
+
+/* headline tiles */
+(function(){
+  const N=DATA.N, e2e=N.map(r=>r.cpu.total_ms/r.custom.total_ms), co=N.map(r=>r.cpu.total_ms/comp(r.custom)), tk=N.map(r=>r.thrust.topk_ms/r.custom.topk_ms);
+  const rng=a=>Math.min(...a).toFixed(1)+'–'+Math.max(...a).toFixed(1)+'×';
+  const rng0=a=>Math.round(Math.min(...a))+'–'+Math.round(Math.max(...a))+'×';
+  const t=[[rng(e2e),'End-to-end vs 20 CPU threads, copies included'],[rng0(co),'GPU compute stages vs the same CPU run'],[rng0(tk),'Custom top-k vs a full Thrust sort']];
+  $('#tiles').innerHTML=t.map(x=>`<div class="tile"><div class="n">${x[0]}</div><div class="l">${x[1]}</div></div>`).join('');
+})();
+
+/* pipeline stages */
+const STAGES=[
+ {t:'Transfer in',s:'host to device',c:'--gray',d:'The corpus (537 MB at N = 1,048,576, D = 128) and the queries are copied from pageable host memory. At about 10.5 GB/s this is the biggest single GPU cost, which makes pinned memory and overlapped copies the first thing to improve.'},
+ {t:'Preprocess',s:'L2 normalize',c:'--s2',d:'One block per vector with 128 threads. Each thread sums squares over a strided slice, a shared-memory tree reduction gives the norm, and every thread scales its slice by the reciprocal square root. After this, cosine similarity is a plain dot product.'},
+ {t:'Score',s:'tiled dot products',c:'--s3',d:'A 32 × 32 tile of the Q × N score matrix per block, stepping along D in chunks of 32. Loads are coalesced and the shared tiles are padded to avoid bank conflicts. Each corpus tile is reused by 32 queries.'},
+ {t:'Top-k',s:'two-stage selection',c:'--s4',d:'Stage 1 runs B blocks per query. Each thread keeps a private sorted list of K, and the block merges the lists with K rounds of block-wide argmax. Stage 2 runs the same kernel over the B × K candidates. Work is O(N) per query with no atomics.'},
+ {t:'Transfer out',s:'K ids and scores',c:'--s5',d:'Only Q × K scores and ids come back, which is a fraction of a millisecond.'}
+];
+(function(){
+  const pipe=$('#pipe');
+  function show(i){
+    [...pipe.children].forEach((b,j)=>b.setAttribute('aria-pressed',String(i===j)));
+    $('#stagedetail').innerHTML='<h3>'+STAGES[i].t+'</h3><p style="margin:0">'+STAGES[i].d+'</p>';
+  }
+  STAGES.forEach((s,i)=>{const b=document.createElement('button');b.className='stage';b.style.borderTopColor='var('+s.c+')';b.innerHTML='<div class="t">'+s.t+'</div><div class="s">'+s.s+'</div>';b.addEventListener('click',()=>show(i));pipe.appendChild(b);});
+  show(3);
+})();
+
+/* top-k stepper */
+(function(){
+  const vals=[0.12,0.83,0.45,0.91,0.33,0.77,0.58,0.64,0.95,0.21,0.69,0.88,0.40,0.52,0.74,0.07];
+  const T=4,K=3;
+  const lists=[];for(let t=0;t<T;t++){const a=[];for(let i=t;i<16;i+=T)a.push({i,v:vals[i]});a.sort((x,y)=>y.v-x.v);lists.push(a.slice(0,K));}
+  const picks=[];const ptr=[0,0,0,0];
+  for(let r=0;r<K;r++){let bt=-1;for(let t=0;t<T;t++){if(ptr[t]<K&&(bt<0||lists[t][ptr[t]].v>lists[bt][ptr[bt]].v))bt=t;}picks.push({t:bt,item:lists[bt][ptr[bt]]});ptr[bt]++;}
+  const steps=[
+   {title:'Step 1 of 5',text:'The row holds 16 scores. Each thread owns every fourth index.'},
+   {title:'Step 2 of 5',text:'Each thread scans its four values and keeps its 3 best in a sorted list. Kept values have a blue outline.'},
+   {title:'Step 3 of 5',text:'Merge round 1: compare the head of every list. The largest head wins and is written to the output.'},
+   {title:'Step 4 of 5',text:'Round 2: the winning thread advances to its next item, then the heads are compared again.'},
+   {title:'Step 5 of 5',text:'Round 3 finishes the top 3. Only 3 values left the block, and no sort of all 16 was needed.'}
+  ];
+  let s=0;
+  function render(){
+    $('#stepTitle').textContent=steps[s].title;
+    const kept=new Set();if(s>=1)lists.forEach(l=>l.forEach(x=>kept.add(x.i)));
+    const won=new Set();for(let r=0;r<s-1&&r<K;r++)won.add(picks[r].item.i);
+    $('#cells').innerHTML=vals.map((v,i)=>`<div class="cell ${won.has(i)?'out':kept.has(i)?'kept':''}"><small>idx ${i} · T${i%T}</small>${v.toFixed(2)}</div>`).join('');
+    if(s<1){$('#lists').innerHTML='<div class="lcol" style="grid-column:1/-1;min-height:0;color:var(--ink2)">Thread lists appear in the next step.</div>';}
+    else{
+      const rounds=Math.max(0,s-1);
+      $('#lists').innerHTML=lists.map((l,t)=>{
+        let h='<div class="lcol"><h4>Thread T'+t+'</h4>';
+        l.forEach((x,k)=>{
+          let cls='item';
+          const popped=picks.slice(0,rounds).filter(p=>p.t===t).length;
+          if(k<popped)cls+=' done';
+          else if(k===popped&&rounds<=K&&s>=2)cls+=' head';
+          if(rounds>=1&&picks[rounds-1].t===t&&picks[rounds-1].item.i===x.i)cls+=' won';
+          h+=`<div class="${cls}">${x.v.toFixed(2)} (idx ${x.i})</div>`;
+        });
+        return h+'</div>';
+      }).join('');
+    }
+    const out=picks.slice(0,Math.max(0,s-1));
+    $('#result').textContent=s>=2?'Output so far: '+(out.map(p=>p.item.v.toFixed(2)+' (idx '+p.item.i+')').join(', ')||'none'):'';
+    $('#stepText').textContent=steps[s].text;
+    $('#prev').disabled=s===0;$('#next').disabled=s===steps.length-1;
+  }
+  $('#prev').onclick=()=>{if(s>0){s--;render();}};
+  $('#next').onclick=()=>{if(s<steps.length-1){s++;render();}};
+  $('#reset').onclick=()=>{s=0;render();};
+  render();
+})();
+
+/* results explorer */
+(function(){
+  const SWEEPS={N:{label:'Corpus size N',fx:x=>x>=1e6?(x/1048576)+'M':(x/1024)+'K',note:'D = 128, Q = 64, K = 10'},K:{label:'K',fx:x=>String(x),note:'N = 1,048,576, D = 128, Q = 64'},Q:{label:'Queries Q',fx:x=>String(x),note:'N = 524,288, D = 128, K = 10'},D:{label:'Dimension D',fx:x=>String(x),note:'N = 524,288, Q = 64, K = 10'}};
+  const SER={cpu:{name:'CPU, 20 threads',v:'--s1'},custom:{name:'GPU, custom top-k',v:'--s2'},thrust:{name:'GPU, Thrust sort',v:'--s3'}};
+  const METRICS={
+   total:{label:'Total time',unit:'ms',log:true,series:['cpu','custom','thrust'],get:(r,k)=>r[k].total_ms,note:'Wall time of the whole pipeline. GPU totals include both copies.'},
+   compute:{label:'Compute only',unit:'ms',log:true,series:['cpu','custom','thrust'],get:(r,k)=>k==='cpu'?r.cpu.total_ms:comp(r[k]),note:'GPU preprocess + score + top-k, excluding copies. The CPU line is its whole run.'},
+   topk:{label:'Top-k stage',unit:'ms',log:true,series:['custom','thrust'],get:(r,k)=>r[k].topk_ms,note:'Only the top-k selection stage on the GPU.'},
+   speed:{label:'Speedup',unit:'×',log:false,series:['custom','thrust'],get:(r,k)=>r.cpu.total_ms/r[k].total_ms,note:'CPU total time divided by GPU total time (copies included).'}
+  };
+  let sw='N',mt='total';
+  function seg(el,obj,cur,cb){el.innerHTML='';Object.keys(obj).forEach(k=>{const b=document.createElement('button');b.textContent=obj[k].label;b.setAttribute('aria-pressed',String(k===cur()));b.onclick=()=>{cb(k);draw();[...el.children].forEach((c,i)=>c.setAttribute('aria-pressed',String(Object.keys(obj)[i]===cur())));};el.appendChild(b);});}
+  seg($('#sweepSeg'),SWEEPS,()=>sw,k=>sw=k);
+  seg($('#metricSeg'),METRICS,()=>mt,k=>mt=k);
+  const W=920,H=400,m={l:64,r:132,t:16,b:50};
+  const svg=$('#chart'),tip=$('#tip'),box=$('#chartbox');
+  let geom=null;
+  function draw(){
+    const M=METRICS[mt],S=SWEEPS[sw],rows=DATA[sw],n=rows.length;
+    const ser=M.series;
+    const vals=ser.map(k=>rows.map(r=>M.get(r,k)));
+    const all=vals.flat();
+    let lo,hi,ticks=[];
+    if(M.log){
+      lo=Math.pow(10,Math.floor(Math.log10(Math.min(...all))));hi=Math.pow(10,Math.ceil(Math.log10(Math.max(...all))));
+      for(let p=Math.log10(lo);p<=Math.log10(hi)+1e-9;p++){[1,3].forEach(f=>{const v=f*Math.pow(10,p);if(v>=lo&&v<=hi)ticks.push(v);});}
+    }else{lo=0;const mx=Math.max(...all);const step=mx>20?5:2;hi=Math.ceil(mx/step)*step;for(let v=0;v<=hi;v+=step)ticks.push(v);}
+    const X=i=>m.l+(n===1?0:i*(W-m.l-m.r)/(n-1));
+    const Y=v=>M.log?m.t+(H-m.t-m.b)*(1-(Math.log10(v)-Math.log10(lo))/(Math.log10(hi)-Math.log10(lo))):m.t+(H-m.t-m.b)*(1-(v-lo)/(hi-lo));
+    let s='';
+    ticks.forEach(t=>{s+=`<line class="grid" x1="${m.l}" x2="${W-m.r}" y1="${Y(t)}" y2="${Y(t)}"/><text x="${m.l-8}" y="${Y(t)+4}" text-anchor="end">${fmt(t,t<1?1:0)}</text>`;});
+    s+=`<line class="ax" x1="${m.l}" x2="${W-m.r}" y1="${H-m.b}" y2="${H-m.b}"/>`;
+    rows.forEach((r,i)=>{s+=`<text x="${X(i)}" y="${H-m.b+20}" text-anchor="middle">${S.fx(r.x)}</text>`;});
+    s+=`<text x="${(m.l+W-m.r)/2}" y="${H-8}" text-anchor="middle">${S.label}</text>`;
+    s+=`<text x="14" y="${(m.t+H-m.b)/2}" text-anchor="middle" transform="rotate(-90 14 ${(m.t+H-m.b)/2})">${M.label} (${M.unit})</text>`;
+    ser.forEach((k,si)=>{
+      const pts=vals[si].map((v,i)=>X(i)+','+Y(v)).join(' ');
+      s+=`<polyline points="${pts}" fill="none" style="stroke:var(${SER[k].v})" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+      vals[si].forEach((v,i)=>{s+=`<circle cx="${X(i)}" cy="${Y(v)}" r="4.5" style="fill:var(${SER[k].v});stroke:var(--surface)" stroke-width="2"/>`;});
+      const lx=X(n-1)+10,ly=Y(vals[si][n-1]);
+      s+=`<text x="${lx}" y="${ly+4}" style="fill:var(--ink)" font-size="13">${fmt(vals[si][n-1])}${M.unit==='×'?'×':' ms'}</text>`;
+    });
+    s+=`<line id="xh" x1="0" x2="0" y1="${m.t}" y2="${H-m.b}" stroke="var(--ink2)" stroke-dasharray="3 3" style="display:none"/>`;
+    svg.innerHTML=s;
+    $('#legend').innerHTML=ser.map(k=>`<span><i class="sw" style="background:var(${SER[k].v})"></i>${SER[k].name}</span>`).join('');
+    $('#metricNote').textContent=M.note+' Fixed: '+S.note+'.';
+    let th='<table><tr><th>'+S.label+'</th>'+ser.map(k=>'<th>'+SER[k].name+' ('+M.unit+')</th>').join('')+'</tr>';
+    rows.forEach((r,i)=>{th+='<tr><td>'+(sw==='N'?r.x.toLocaleString('en-US'):r.x)+'</td>'+ser.map((k,si)=>'<td>'+fmt(vals[si][i])+'</td>').join('')+'</tr>';});
+    $('#tbl').innerHTML=th+'</table>';
+    geom={X,n,rows,ser,vals,M,S};
+  }
+  function hover(ev){
+    if(!geom)return;const r=svg.getBoundingClientRect();const px=(ev.clientX-r.left)*(W/r.width);
+    let bi=0,bd=1e9;for(let i=0;i<geom.n;i++){const d=Math.abs(geom.X(i)-px);if(d<bd){bd=d;bi=i;}}
+    const xh=svg.querySelector('#xh');xh.setAttribute('x1',geom.X(bi));xh.setAttribute('x2',geom.X(bi));xh.style.display='';
+    let h='<b>'+geom.S.label+' = '+(sw==='N'?geom.rows[bi].x.toLocaleString('en-US'):geom.rows[bi].x)+'</b>';
+    geom.ser.forEach((k,si)=>{h+=`<div class="r"><span><i class="sw" style="background:var(${SER[k].v});width:10px;height:10px"></i> ${SER[k].name}</span><span>${fmt(geom.vals[si][bi])}${geom.M.unit==='×'?'×':' ms'}</span></div>`;});
+    tip.innerHTML=h;tip.style.display='block';
+    const bx=box.getBoundingClientRect();let left=(geom.X(bi)*r.width/W)+14;if(left+tip.offsetWidth>bx.width)left=(geom.X(bi)*r.width/W)-tip.offsetWidth-14;
+    tip.style.left=Math.max(4,left)+'px';tip.style.top='20px';
+  }
+  svg.addEventListener('pointermove',hover);svg.addEventListener('pointerdown',hover);
+  svg.addEventListener('pointerleave',()=>{tip.style.display='none';const xh=svg.querySelector('#xh');if(xh)xh.style.display='none';});
+  draw();
+})();
+
+/* stage breakdown */
+(function(){
+  const rows=DATA.N;let cur=4;
+  const SC=[['h2d_ms','Host to device','--s1'],['preprocess_ms','Preprocess','--s2'],['score_ms','Score','--s3'],['topk_ms','Top-k','--s4'],['d2h_ms','Device to host','--s5']];
+  $('#blegend').innerHTML=SC.map(x=>`<span><i class="sw" style="background:var(${x[2]})"></i>${x[1]}</span>`).join('')+'<span><i class="sw" style="background:var(--gray)"></i>CPU score + top-k (fused)</span>';
+  const nseg=$('#nSeg');
+  rows.forEach((r,i)=>{const b=document.createElement('button');b.textContent=r.x.toLocaleString('en-US');b.onclick=()=>{cur=i;draw();[...nseg.children].forEach((c,j)=>c.setAttribute('aria-pressed',String(j===cur)));};nseg.appendChild(b);});
+  function bar(parts,max){return '<div class="stack">'+parts.map(p=>`<div style="width:${(p.v/max*100).toFixed(2)}%;background:var(${p.c})" title="${p.n}: ${fmt(p.v)} ms"></div>`).join('')+'</div>';}
+  function draw(){
+    [...nseg.children].forEach((c,j)=>c.setAttribute('aria-pressed',String(j===cur)));
+    const r=rows[cur],max=r.cpu.total_ms;
+    const cpu=[{v:r.cpu.preprocess_ms,c:'--s2',n:'Preprocess'},{v:r.cpu.score_ms,c:'--gray',n:'Score + top-k (fused)'}];
+    const g=k=>SC.map(x=>({v:r[k][x[0]],c:x[2],n:x[1]}));
+    const cap=k=>SC.map(x=>x[1]+' '+fmt(r[k][x[0]])).join(' · ');
+    $('#bars').innerHTML=
+     `<div class="brow"><div class="bl"><span>CPU, 20 threads</span><span>${fmt(r.cpu.total_ms)} ms</span></div>${bar(cpu,max)}<div class="cap">Preprocess ${fmt(r.cpu.preprocess_ms)} · Score + top-k ${fmt(r.cpu.score_ms)}</div></div>`+
+     `<div class="brow"><div class="bl"><span>GPU, custom top-k</span><span>${fmt(r.custom.total_ms)} ms</span></div>${bar(g('custom'),max)}<div class="cap">${cap('custom')}</div></div>`+
+     `<div class="brow"><div class="bl"><span>GPU, Thrust sort</span><span>${fmt(r.thrust.total_ms)} ms</span></div>${bar(g('thrust'),max)}<div class="cap">${cap('thrust')}</div></div>`;
+  }
+  draw();
+})();
+
+/* block table */
+(function(){
+  let h='<tr><th>B (blocks per query)</th>'+BDATA.map(b=>'<th>'+b.B+'</th>').join('')+'</tr><tr><td>Top-k stage (ms)</td>'+BDATA.map(b=>'<td>'+b.topk.toFixed(2)+'</td>').join('')+'</tr>';
+  $('#btable').innerHTML=h;
+})();
+
+/* copy buttons */
+document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>{
+  const t=document.getElementById(b.dataset.copy).textContent;
+  try{navigator.clipboard.writeText(t).then(()=>{b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1500);},()=>{b.textContent='Select and copy';});}catch(e){b.textContent='Select and copy';}
+}));
+</script>
+</body>
+</html>
